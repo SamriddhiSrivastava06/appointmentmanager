@@ -1,0 +1,174 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  role          String         @default("PATIENT") // "PATIENT", "DOCTOR", "ADMIN"
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  doctorProfile DoctorProfile?
+  appointments  Appointment[]  @relation("PatientAppointments")
+  waitlists     Waitlist[]
+  notifications Notification[]
+  googleTokens  GoogleToken?
+}
+
+model DoctorProfile {
+  id             String        @id @default(uuid())
+  userId         String        @unique
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialization String
+  workingHours   String        // JSON stringified start and end hours, e.g. '{"start":"09:00","end":"17:00"}'
+  slotDuration   Int           // in minutes, e.g. 30
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  leaveDays      LeaveDay[]
+  appointments   Appointment[]
+  waitlists      Waitlist[]
+}
+
+model LeaveDay {
+  id              String        @id @default(uuid())
+  doctorProfileId String
+  doctorProfile   DoctorProfile @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
+  date            DateTime      // Date of leave
+  createdAt       DateTime      @default(now())
+
+  @@unique([doctorProfileId, date])
+}
+
+model Appointment {
+  id               String            @id @default(uuid())
+  patientId        String
+  patient          User              @relation("PatientAppointments", fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId         String
+  doctor           DoctorProfile     @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  startTime        DateTime
+  endTime          DateTime
+  status           String            @default("BOOKED") // "BOOKED", "CANCELLED", "COMPLETED"
+  symptoms         String?
+  googleEventId    String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  symptomSummary   SymptomSummary?
+  visitNote        VisitNote?
+  prescriptions    Prescription[]
+  waitlistedNotify Boolean           @default(false)
+}
+
+model SlotHold {
+  id        String   @id @default(uuid())
+  doctorId  String
+  startTime DateTime
+  endTime   DateTime
+  heldById  String   // userId of holding patient
+  expiresAt DateTime
+  resolved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([doctorId, startTime])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String   // e.g. "HOLD_ATTEMPT", "HOLD_SUCCESS", "HOLD_EXPIRED", "HOLD_RELEASED", "BOOKING_CONFIRMED"
+  details   String
+  userId    String?
+  createdAt DateTime @default(now())
+}
+
+model SymptomSummary {
+  id             String       @id @default(uuid())
+  appointmentId  String       @unique
+  appointment    Appointment  @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  urgency        String       @default("LOW") // "LOW", "MEDIUM", "HIGH"
+  chiefComplaint String
+  questions      String       // JSON stringified array of strings
+  rawResponse    String?
+  status         String       // "PENDING", "COMPLETED", "FAILED"
+  retryCount     Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model VisitNote {
+  id                    String       @id @default(uuid())
+  appointmentId         String       @unique
+  appointment           Appointment  @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  clinicalNotes         String
+  patientFriendlySummary String?
+  status                String       // "PENDING", "COMPLETED", "FAILED"
+  retryCount            Int          @default(0)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+}
+
+model Prescription {
+  id            String       @id @default(uuid())
+  appointmentId String
+  appointment   Appointment  @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  medication    String
+  dosage        String
+  frequency     String       // e.g. "Every 8 hours", "Daily", "Twice a day"
+  duration      String       // e.g. "7 days"
+  remindersSent Int          @default(0)
+  createdAt     DateTime     @default(now())
+}
+
+model MedicationReminderLog {
+  id             String   @id @default(uuid())
+  prescriptionId String
+  scheduledTime  DateTime
+  sentTime       DateTime @default(now())
+  status         String   // "SENT", "FAILED"
+  retryCount     Int      @default(0)
+  error          String?
+}
+
+model Waitlist {
+  id              String        @id @default(uuid())
+  patientId       String
+  patient         User          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorProfileId String
+  doctorProfile   DoctorProfile @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
+  preferredDate   DateTime      // Date the patient wants to book
+  createdAt       DateTime      @default(now())
+
+  @@unique([patientId, doctorProfileId, preferredDate])
+}
+
+model Notification {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       String   // "EMAIL", "CALENDAR"
+  subject    String
+  body       String
+  recipient  String
+  status     String   // "PENDING", "SENT", "FAILED"
+  retryCount Int      @default(0)
+  error      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model GoogleToken {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken  String
+  refreshToken String?
+  expiryDate   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
